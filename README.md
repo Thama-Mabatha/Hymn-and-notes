@@ -9,7 +9,7 @@ Nyimbo dza Vhatendi is an offline-first digital Tshivenḓa hymnal and personal 
 - Comfortable reader settings, themes, focus mode, sharing and installable PWA support.
 - Local-first sermon notes with autosave to IndexedDB, scripture parsing, topics, pastors and hymn relationships.
 - Scripture chapter index: `Psalm 27` and `Psalm 27:1-6` resolve to the same chapter.
-- Optional Supabase email authentication and queued sync foundation. Hymns and local notes never require a login.
+- Optional Supabase email authentication and queued note sync. Hymns and local notes never require a login.
 - JSON data export, Netlify SPA routing and no advertising or analytics.
 
 ## Screenshots
@@ -25,7 +25,7 @@ Add mobile and desktop screenshots here after deployment. Recommended captures: 
 - Lucide React for interface icons.
 - IndexedDB through `idb` for sermon notes and old-note imports.
 - localStorage for smaller things like favourites, recent hymns and reader settings.
-- Supabase JavaScript client for optional auth and future note sync.
+- Supabase JavaScript client for optional auth and hosted note sync.
 - vite-plugin-pwa for the installable app, manifest and service worker.
 - Vitest, jsdom and fake-indexeddb for automated tests.
 - Netlify for static hosting and SPA redirects.
@@ -34,7 +34,7 @@ Add mobile and desktop screenshots here after deployment. Recommended captures: 
 
 `scripts/import-hymns.ts` extracts the DOCX into `src/data/hymns.json` at build time. The UI reads this static data entirely offline. Hymn preferences use localStorage; sermon notes use IndexedDB through `src/lib/notes-repository.ts`.
 
-When configured, the sync path is: React UI -> IndexedDB -> `sync-service.ts` -> Supabase. Local storage is written first, so a failed request never destroys a note. The first conflict policy is documented last-write-wins via `updated_at`; production sync should also upsert scripture, topics and hymn join records in the same transactional adapter.
+When configured, the sync path is: React UI -> IndexedDB -> `sync-service.ts` -> Supabase. Local storage is written first, so a failed request never destroys a note. Pending notes are uploaded with their scripture references, topics and related hymn links. The first conflict policy is last-write-wins via `updated_at`.
 
 ## Hymn Data Import
 
@@ -61,13 +61,16 @@ Run tests with `npm test`, and create a production bundle with `npm run build`.
 1. Create a Supabase project and enable email authentication.
 2. Copy `.env.example` to `.env` and add only `VITE_SUPABASE_URL` and the public anon/publishable key.
 3. Apply `supabase/migrations/20260901000000_sermon_archive.sql` through the Supabase CLI or SQL editor.
-4. Start the app. Signed-out users remain in local mode; signing in enables the sync layer.
+4. For Netlify, add the same two variables under Site configuration -> Environment variables.
+5. Start or redeploy the app. Signed-out users remain in local mode; signing in enables the sync layer.
 
 Row Level Security policies scope every note, reference, topic and hymn link to the authenticated owner. Never add a service-role key to a Vite environment variable.
 
+The backend database is hosted by Supabase, not Netlify. Netlify hosts the static PWA, then the browser connects to Supabase using the public anon key and the user's authenticated session.
+
 ## Netlify Deployment
 
-Push the repository to a Git provider, create a Netlify site, then use build command `npm run build` and publish directory `dist`. `netlify.toml` includes the SPA redirect required for direct URLs such as `/hymn/65`.
+Push the repository to a Git provider, create a Netlify site, then use build command `npm run build` and publish directory `dist`. `netlify.toml` includes the SPA redirect required for direct URLs such as `/hymn/65`. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in Netlify if you want hosted sign-in and sync.
 
 ## Privacy and Data Ownership
 
@@ -75,7 +78,6 @@ Sermon notes are private by default, are not indexed or included in social metad
 
 ## Roadmap
 
-- Complete transactional syncing of note references, topics and hymn relationships.
 - JSON restore flow and Markdown export.
 - English translations when supplied by a licensed source.
 - Optional licensed audio, cloud conflict UI, multiple hymn books and service set lists.

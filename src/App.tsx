@@ -6,6 +6,7 @@ import { notesRepository } from './lib/notes-repository';
 import { parseScriptureReference, scriptureKey } from './lib/scripture';
 import { defaultSettings, readLocal, recentHymns, rememberHymn, writeLocal } from './lib/storage';
 import { supabase } from './lib/supabase';
+import { sendSignInLink, syncPendingNotes } from './lib/sync-service';
 import type { Hymn, ReaderSettings, SermonNote } from './types';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -852,7 +853,23 @@ function CollectionsPage() {
 function SettingsPage() {
   const [settings, setSettings] = useState<ReaderSettings>(() => readLocal('reader-settings', defaultSettings));
   const [email, setEmail] = useState('');
+  const [accountEmail, setAccountEmail] = useState('');
+  const [syncMessage, setSyncMessage] = useState('');
   const client = supabase;
+
+  useEffect(() => {
+    if (!client) return;
+
+    client.auth.getSession().then(({ data }) => {
+      setAccountEmail(data.session?.user.email ?? '');
+    });
+
+    const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
+      setAccountEmail(session?.user.email ?? '');
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, [client]);
 
   function updateSettings(nextSettings: ReaderSettings) {
     setSettings(nextSettings);
@@ -867,8 +884,44 @@ function SettingsPage() {
   async function handleSignIn(event: React.FormEvent) {
     event.preventDefault();
 
+    const result = await sendSignInLink(email);
+
+    if (result.available && !result.error) {
+      setSyncMessage('Check your email for the sign-in link.');
+    } else {
+      setSyncMessage(result.error ?? 'Supabase is not configured yet.');
+    }
+  }
+
+  async function handleSyncNow() {
+    if (!client) {
+      setSyncMessage('Supabase is not configured yet.');
+      return;
+    }
+
+    const { data } = await client.auth.getUser();
+
+    if (!data.user) {
+      setSyncMessage('Sign in first, then we can sync your notes.');
+      return;
+    }
+
+    const result = await syncPendingNotes(data.user.id);
+
+    if (result.error) {
+      setSyncMessage(`Sync failed, but your local notes are safe: ${result.error}`);
+    } else if (!result.available) {
+      setSyncMessage('Sync is unavailable while offline or before Supabase is configured.');
+    } else {
+      setSyncMessage(`Synced ${result.synced} local note${result.synced === 1 ? '' : 's'}.`);
+    }
+  }
+
+  async function handleSignOut() {
     if (client) {
-      await client.auth.signInWithOtp({ email });
+      await client.auth.signOut();
+      setAccountEmail('');
+      setSyncMessage('Signed out. Your local notes are still on this device.');
     }
   }
 
@@ -920,7 +973,13 @@ function SettingsPage() {
 
       <section className="settings-card">
         <h2>Account & sync</h2>
-        {client ? (
+        {client && accountEmail ? (
+          <div className="stack">
+            <p>Synced mode: signed in as {accountEmail}.</p>
+            <button className="button" type="button" onClick={handleSyncNow}>Sync now</button>
+            <button className="button secondary" type="button" onClick={handleSignOut}>Sign out</button>
+          </div>
+        ) : client ? (
           <form onSubmit={handleSignIn}>
             <p>Sign in to back up your notes across devices.</p>
             <input type="email" required value={email} onChange={handleEmailChange} placeholder="you@example.com" />
@@ -929,6 +988,7 @@ function SettingsPage() {
         ) : (
           <p>Local mode: your notes live only on this device. Add Supabase environment variables to enable private backup and sync.</p>
         )}
+        {syncMessage && <p className="muted">{syncMessage}</p>}
       </section>
 
       <section className="settings-card">
@@ -993,6 +1053,15 @@ function AppRoutes() {
 
   async function removeNote(id: string) {
     await notesRepository.remove(id);
+
+    if (supabase && navigator.onLine) {
+      const { data } = await supabase.auth.getUser();
+
+      if (data.user) {
+        await supabase.from('sermon_notes').delete().eq('id', id).eq('user_id', data.user.id);
+      }
+    }
+
     setNotes((items) => items.filter((note) => note.id !== id));
   }
 

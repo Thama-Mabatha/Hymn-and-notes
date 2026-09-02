@@ -1,3 +1,5 @@
+create extension if not exists pgcrypto;
+
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   display_name text,
@@ -14,6 +16,7 @@ create table public.sermon_notes (
   service text,
   content text not null default '',
   personal_reflection text,
+  key_takeaways text[] not null default '{}',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -32,8 +35,12 @@ create table public.sermon_hymns (sermon_note_id uuid not null references public
 
 create index sermon_notes_user_date_idx on public.sermon_notes(user_id, sermon_date desc);
 create index sermon_notes_user_pastor_idx on public.sermon_notes(user_id, pastor);
+create index sermon_notes_user_church_idx on public.sermon_notes(user_id, church);
 create index sermon_notes_updated_idx on public.sermon_notes(updated_at desc);
 create index scripture_references_chapter_idx on public.scripture_references(book, chapter);
+create index scripture_references_note_idx on public.scripture_references(sermon_note_id);
+create index sermon_hymns_hymn_idx on public.sermon_hymns(hymn_number);
+create index topics_user_name_idx on public.topics(user_id, name);
 
 alter table public.profiles enable row level security;
 alter table public.sermon_notes enable row level security;
